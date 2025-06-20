@@ -37,7 +37,7 @@ WORKDIR /tmp
 
 # Download the SMTP plugin from its GitHub releases.
 # -L follows redirects, -o specifies the output file name.
-RUN curl -L -o smtp.zip "https://github.com/splitbrain/dokuwiki-plugin-smtp/archive/refs/tags/${SMTP_PLUGIN_VERSION}.zip"
+RUN curl -L -o smtp.zip "https://github.com/splitbrain/dokuwiki-plugin-smtp/zipball/master"
 
 # Unzip the plugin into the DokuWiki plugins directory and rename it.
 # The unzip command typically creates a directory named after the repository and tag (e.g., dokuwiki-plugin-smtp-2023-01-20).
