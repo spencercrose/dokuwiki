@@ -1,122 +1,70 @@
-name: Build and Publish Docker Images
+name: Build and Push Docker Image to GHCR
+
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "23 0 * * *"
+  push:
+    branches:
+      - main # Trigger on pushes to the main branch
+  workflow_dispatch: # Allow manual triggering
 
 jobs:
-  buildmatrix:
-    name: Create Build Matrix
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-      - name: Cache Setup
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: .github/matrix.cache/
-          key: ${{ runner.os }}-matrix-${{ github.run_id }}
-          restore-keys: |
-                ${{ runner.os }}-matrix-
-      - name: Set up matrix
-        id: set-matrix
-        run: |
-          php .github/matrix.php >> $GITHUB_OUTPUT
-
-  build:
-    needs: buildmatrix
-    name: Build Docker Image for ${{ matrix.release.type }}
-    runs-on: ubuntu-22.04 # see dokuwiki/docker#27
-    if: ${{ needs.buildmatrix.outputs.matrix != '[]' }}
-    strategy:
-      matrix: ${{fromJson(needs.buildmatrix.outputs.matrix)}}
-      fail-fast: false
+  build_and_push:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest # Using ubuntu-latest for simplicity, consistent with Dockerfile's base image
     permissions:
       contents: read
-      packages: write
+      packages: write # Necessary for pushing to GHCR
+
     steps:
-      -
-        name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
-      -
-        name: Set up QEMU
+
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-      -
-        name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      -
-        name: Login to DockerHub
-        uses: docker/login-action@v3
         with:
-          username: splitbrain
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      -
-        name: Login to GitHub Container Registry
+          platforms: all # Enable building for multiple platforms
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      -
-        name: Prepare Docker Tags
+
+      - name: Prepare Docker Tags
         id: docker_tags
         run: |
-          # Initialize tag arrays
-          TAGS=()
+          # Define the image name based on the GitHub repository
+          IMAGE_NAME="ghcr.io/${{ github.repository }}"
+          # Use a simple 'latest' tag for pushes to main, or a custom tag for workflow_dispatch if desired.
+          # For a more robust setup, you might use:
+          # - A version tag from a Git tag (e.g., if on: push: tags: )
+          # - A short commit SHA for development builds
           
-          # DockerHub Tags
-          if [[ "${{ matrix.release.type }}" == "master" ]]; then
-            TAGS+=("dokuwiki/dokuwiki:master")
-          else
-            TAGS+=("dokuwiki/dokuwiki:${{ matrix.release.date }}")
-            TAGS+=("dokuwiki/dokuwiki:${{ matrix.release.type }}")
-            if [[ "${{ matrix.release.type }}" == "stable" ]]; then
-              TAGS+=("dokuwiki/dokuwiki:latest")
-            fi
-          fi
+          TAGS="${IMAGE_NAME}:latest"
           
-          # GitHub Packages Tags
-          if [[ "${{ matrix.release.type }}" == "master" ]]; then
-            TAGS+=("ghcr.io/dokuwiki/dokuwiki:master")
-          else
-            TAGS+=("ghcr.io/dokuwiki/dokuwiki:${{ matrix.release.date }}")
-            TAGS+=("ghcr.io/dokuwiki/dokuwiki:${{ matrix.release.type }}")
-            if [[ "${{ matrix.release.type }}" == "stable" ]]; then
-              TAGS+=("ghcr.io/dokuwiki/dokuwiki:latest")
-            fi
-          fi
-          
-          # Convert array to multiline string for GitHub Actions
-          {
-            echo "tags<<EOF"
-            printf "%s\n" "${TAGS[@]}"
-            echo "EOF"
-          } >> $GITHUB_OUTPUT
-      -
-        name: Build and push
+          # If you want to use the branch name as a tag (e.g., ghcr.io/user/repo:main)
+          # if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          #   TAGS="${IMAGE_NAME}:main,${TAGS}"
+          # fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+
+      - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
-          platforms: linux/amd64,linux/arm64
+          context: . # Build context is the current directory
+          platforms: linux/amd64,linux/arm64 # Building for common architectures
           push: true
-          cache-from: type=gha, scope=${{ github.workflow }}
-          cache-to: type=gha, scope=${{ github.workflow }}
           tags: ${{ steps.docker_tags.outputs.tags }}
-          build-args: |
-             DOKUWIKI_VERSION=${{ matrix.release.type == 'master' && 'master' || matrix.release.date }}
-
-  workflow-keepalive:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-    steps:
-      - uses: liskin/gh-workflow-keepalive@v1
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # You might need build-args if your Dockerfile relies on them.
+          # For example, if you want to pass DOKUWIKI_VERSION:
+          # build-args: |
+          #    DOKUWIKI_VERSION=stable
+          # Or if you want it dynamic based on a variable:
+          # build-args: |
+          #    DOKUWIKI_VERSION=${{ env.DOKUWIKI_VERSION_ARG }}
+          cache-from: type=gha, scope=${{ github.workflow }}
+          cache-to: type=gha, mode=max, scope=${{ github.workflow }} # Use mode=max for better caching
