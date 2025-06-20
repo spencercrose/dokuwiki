@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dokuwiki.fullname" . }}
+  labels:
+    {{- include "dokuwiki.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dokuwiki.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "dokuwiki.labels" . | nindent 8 }}
+  {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dokuwiki.serviceAccountName" . }}
+      securityContext:
+        # {{- /*
+        #     Apply the runAsUser and runAsGroup from the Dockerfile.
+        #     You should define these in your values.yaml, e.g.:
+        #     podSecurityContext:
+        #       runAsUser: 1001
+        #       runAsGroup: 1001
+        #       fsGroup: 1001
+        # */}}
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- /*
+                Container-level security context can override pod-level if needed,
+                but for DokuWiki, the pod-level is usually sufficient for user/group.
+                You can define this in your values.yaml if needed.
+            */}}
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              # From Dockerfile: EXPOSE 8080
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # From Dockerfile: PHP_UPLOADLIMIT, PHP_MEMORYLIMIT, PHP_TIMEZONE
+            - name: PHP_UPLOADLIMIT
+              value: {{ .Values.php.uploadLimit | quote }}
+            - name: PHP_MEMORYLIMIT
+              value: {{ .Values.php.memoryLimit | quote }}
+            - name: PHP_TIMEZONE
+              value: {{ .Values.php.timezone | quote }}
+          livenessProbe:
+            # From Dockerfile HEALTHCHECK --timeout=5s CMD curl --silent --fail-with-body http://localhost:8080/health.php || exit 1
+            httpGet:
+              path: /health.php
+              port: http
+            initialDelaySeconds: 30 # Give DokuWiki time to start up
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            # Similar to liveness, but can be less strict or have a shorter initial delay
+            httpGet:
+              path: /health.php
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # From Dockerfile: VOLUME /storage
+            - name: dokuwiki-storage
+              mountPath: /storage
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        # Define the PVC for /storage
+        - name: dokuwiki-storage
+          persistentVolumeClaim:
+            claimName: {{ include "dokuwiki.fullname" . }}-pvc # Assuming PVC name derived from release name
+        {{- with .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
