@@ -40,8 +40,8 @@ RUN chown -R ${APP_USER}:${APP_USER} /storage
 
 # Ensure entrypoint and healthcheck scripts are executable by the non-root user
 RUN chmod +x /dokuwiki-entrypoint.sh && \
-    chmod +x /health.php # Assuming health.php is in /var/www/html and needs exec for curl
-
+    chmod +x /var/www/html/health.php
+    
 # Listen on a non-privileged port for OpenShift
 EXPOSE 8080
 
