@@ -5,6 +5,7 @@ FROM dokuwiki/dokuwiki:latest
 # Define build argument for the SMTP plugin version.
 # Check https://github.com/splitbrain/dokuwiki-plugin-smtp/releases for the latest stable version.
 ARG SMTP_PLUGIN_VERSION="2023-01-20"
+ARG SMTP_PLUGIN_PATH="https://github.com/splitbrain/dokuwiki-plugin-smtp/zipball/master"
 
 # Switch to root user to install system packages and modify configurations.
 USER root
@@ -35,16 +36,32 @@ COPY root/var/www/html/health.php /var/www/html/health.php
 # Set the working directory to a temporary location for downloading the plugin.
 WORKDIR /tmp
 
-# Download the SMTP plugin from its GitHub releases.
-# -L follows redirects, -o specifies the output file name.
-RUN curl -L -o smtp.zip "https://github.com/splitbrain/dokuwiki-plugin-smtp/zipball/master"
+# --- DokuWiki SMTP Plugin Installation ---
+# Set the working directory to a temporary location for downloading and processing.
+# We create a unique temporary directory to avoid conflicts if /tmp contains other files.
+WORKDIR /tmp/dokuwiki_plugin_install
 
-# Unzip the plugin into the DokuWiki plugins directory and rename it.
-# The unzip command typically creates a directory named after the repository and tag (e.g., dokuwiki-plugin-smtp-2023-01-20).
-# DokuWiki expects plugin directories to be named after the plugin's short ID (e.g., 'smtp').
-RUN unzip smtp.zip -d /dokuwiki/lib/plugins/ && \
-    mv /dokuwiki/lib/plugins/dokuwiki-plugin-smtp-${SMTP_PLUGIN_VERSION} /dokuwiki/lib/plugins/smtp && \
-    rm smtp.zip # Clean up the downloaded zip file
+# Download the SMTP plugin.
+RUN set -eux; \
+    curl -fL -o smtp.zip ${SMTP_PLUGIN_PATH}; \
+
+# Unzip the plugin into the current temporary directory.
+# This will create the plugin's root folder (e.g., 'dokuwiki-plugin-smtp-2023-01-20')
+# inside '/tmp/dokuwiki_plugin_install/'.
+RUN set -eux; \
+    unzip smtp.zip; \
+    # Find the name of the extracted plugin directory.
+    # 'find . -maxdepth 1 -mindepth 1 -type d' looks for directories only one level deep.
+    # '-print -quit' prints the first one found and exits, assuming there's only one.
+    EXTRACTED_DIR=$(find . -maxdepth 1 -mindepth 1 -type d -print -quit); \
+    # Move the detected extracted directory to the final 'smtp' location.
+    # This directly renames the extracted folder to 'smtp' under /dokuwiki/lib/plugins/
+    mv "${EXTRACTED_DIR}" /dokuwiki/lib/plugins/smtp; \
+    # Clean up the downloaded zip file and the temporary working directory.
+    rm smtp.zip; \
+    rm -rf /tmp/dokuwiki_plugin_install # Remove the temporary working directory
+
+# ... (rest of the Dockerfile remains the same) ...
 
 # --- Permissions for added files and directories ---
 # The official `dokuwiki/dokuwiki` image primarily uses the `www-data` user (UID/GID 33).
